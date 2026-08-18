@@ -1,0 +1,94 @@
+{
+  "_comment": "These are hard numeric limits. Claude's reasoning/thesis step may NEVER override these values. Any proposed trade that violates a rule here must be rejected before it reaches pm_order.py, with no exceptions regardless of how strong the thesis sounds.",
+
+  "wallet_address": "YOUR_POLYGON_WALLET_ADDRESS_HERE",
+  "starting_capital_usd": 500.00,
+  "starting_capital_usd_note": "Net deposits minus withdrawals, not live portfolio value -- excludes trading P&L so the loss-limit base doesn't drift with performance. Human updates by hand after each deposit/withdrawal.",
+
+  "execution": {
+    "mode": "dry_run",
+    "note": "mode must be manually changed from 'dry_run' to 'live' by the human. Claude must never change this value itself, and must refuse to place live orders while mode is 'dry_run'.",
+    "dry_run_min_cycles_before_live": 10,
+    "live_blocked_note": "As of 2026-08, live orders additionally require a Polymarket Deposit Wallet -- the CLOB rejects EOA makers with 'maker address not allowed, please use the deposit wallet flow', and collateral has moved from USDC.e to pUSD (0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB). pm_order.py refuses live orders until deposit_wallet_address is set and funded. Screening, thesis and dry_run all work without it."
+  },
+
+  "deposit_wallet_address": "",
+
+  "universe": {
+    "_comment": "Replaces upstream's stock watchlist/scan. Candidates come from Gamma's market list, filtered mechanically before any thesis work.",
+    "max_candidates": 25,
+
+    "min_volume_24hr_usd": 20000,
+    "min_liquidity_usd": 10000,
+    "max_spread": 0.03,
+    "max_spread_note": "best_ask - best_bid. A wide book means you cannot exit near your mark; on a 0-1 instrument a 5c spread is ~10% of a 0.50 position. An empty side of the book is an automatic reject, never treated as zero spread.",
+
+    "min_days_to_resolution": 1,
+    "max_days_to_resolution": 90,
+    "days_to_resolution_note": "Below the minimum there is no time for a stop-loss to matter -- the event resolves before you could react, so the position is a coin flip, not a trade. Above the maximum, capital sits locked for a marginal edge.",
+
+    "min_entry_price": 0.45,
+    "max_entry_price": 0.85,
+    "entry_price_note": "The single most important filter in this file, and the one with actual evidence behind it. In 46 settled paper trades on this account's own data, entries below 0.50 returned -65% (17 trades, 3 winners) while entries in 0.50-0.80 returned +17% to +35%. Long shots are where retail conviction is worst-priced. The upper bound exists because above ~0.85 the remaining upside no longer covers the spread. NOTE: that sample is small (46 trades, one week) and was measured on a copy-trading strategy, not this one -- treat the band as a prior to re-validate in dry_run, not as an established edge.",
+
+    "exclude_negrisk": false,
+    "exclude_negrisk_note": "neg-risk (multi-outcome) markets settle through a different adapter contract. Screening works either way; set true if you want to keep the first live deployment on plain binary markets only."
+  },
+
+  "signal_thresholds": {
+    "_comment": "A candidate qualifies for a Phase A news search + thesis if it meets ANY ONE of these, computed from data already pulled during screening (no extra API calls). Mechanical gate, not a judgment call. Currently-held positions are exempt and always get a thesis.",
+    "price_move_24h_pct": 0.08,
+    "volume_spike_multiple": 2.0,
+    "volume_spike_note": "volume24hr divided by the trailing weekly daily-average (volume1wk / 7).",
+    "pct_from_price_extreme": 0.05,
+    "pct_from_price_extreme_note": "How close the outcome price sits to 0.00 or 1.00. Near-extreme prices move on genuinely new information, which is what makes them worth reading the news for."
+  },
+
+  "cadence": {
+    "news_search_budget_per_cycle": 30
+  },
+
+  "position_sizing": {
+    "max_position_pct_of_account": 0.20,
+    "max_concurrent_positions": 4,
+    "min_cash_buffer_pct": 0.10,
+    "min_top_up_usd": 5.00,
+    "min_top_up_pct_of_target": 0.10,
+    "min_order_usd": 1.00,
+    "min_order_usd_note": "Polymarket's own minimum. Orders computed below this are skipped rather than rounded up.",
+    "min_top_up_note": "A top-up only fires if the computed buy amount clears max(min_order_usd, min_top_up_usd, min_top_up_pct_of_target x target_size). Below that, skip -- a top-up smaller than this doesn't move the position meaningfully and generates a long tail of dust orders as the position converges on target. Applies to top-ups only, never to new-entry sizing."
+  },
+
+  "stop_loss": {
+    "mode": "fixed",
+    "hard_stop_pct": 0.20,
+    "volatility_lookback_days": 20,
+    "volatility_stdev_multiplier": 2.5,
+    "min_stop_pct": 0.12,
+    "max_stop_pct": 0.35,
+    "fallback_stop_pct": 0.20,
+    "note": "Stops are wider than upstream's equity defaults on purpose: outcome prices are bounded in 0-1 and routinely swing 10-20% intraday on no news at all, so a 7% stop would be pure noise-harvesting. Every open position must have this checked every cycle, independent of any new thesis. A good new narrative does not cancel a stop-loss.",
+    "resolution_override": true,
+    "resolution_override_note": "A stop-loss cannot execute in a market that has already resolved. Phase B must therefore settle resolved positions from the CLOB's own tokens[].winner before evaluating stops, and must never propose an exit in a market where clob_market().closed is true."
+  },
+
+  "take_profit": {
+    "tiers": [
+      {"gain_pct": 0.20, "sell_fraction_of_position": 0.25},
+      {"gain_pct": 0.40, "sell_fraction_of_position": 0.25},
+      {"gain_pct": 0.70, "sell_fraction_of_position": 0.25}
+    ],
+    "note": "Tiered partial take-profit. Checked every cycle, independent of any new thesis. Each tier fires once per holding period when gain first reaches it. Tiers are set higher than upstream's equity version because a binary bought at 0.55 that goes on to resolve YES returns +82%, so exiting a quarter of the position at +15% would be leaving most of the trade on the table."
+  },
+
+  "loss_limits": {
+    "daily_loss_limit_pct_of_account": 0.05,
+    "weekly_loss_limit_pct_of_account": 0.10
+  },
+
+  "opposite_side_guard": {
+    "enabled": true,
+    "note": "Replaces upstream's wash-sale guard, which does not apply here -- prediction-market contracts are not securities. This guard blocks a very real Polymarket-specific way to lose money instead: holding both sides of the same conditionId. YES at 0.65 plus NO at 0.54 costs 1.19 to buy something that pays exactly 1.00, so it is a locked-in 19% loss no matter how the event resolves. Observed live: two separate high-ranked traders took opposite sides of the same ETH market within minutes. Blocks BUYS only -- never blocks a stop_loss/take_profit/exit sell, since risk management must never bend to this.",
+    "scope": "condition_id"
+  }
+}
